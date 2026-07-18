@@ -49,6 +49,12 @@ in the last 24 h/7 d — proves the *download* direction independently), the
 cloud-side asset count vs local, pending reset count and age, outgoing-pipeline
 last-touch, and daemon uptimes.
 
+Nuance: during an active upload phase the engine works in throttled bursts, so a
+single 🟠 STUCK can be a pause between bursts. Treat the first one as
+provisional — `--kick` is harmless and usually restarts the burst; escalate to
+the toggle only if a *second* 15-minute interval after the kick still shows no
+movement.
+
 ## The toggle (when the doctor says WEDGED and `--kick` didn't clear it)
 
 Photos → Settings → iCloud → uncheck **iCloud Photos** → wait 2–3 minutes →
