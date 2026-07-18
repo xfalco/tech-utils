@@ -173,8 +173,11 @@ elif (( TOTAL > 0 && AWAITING * 100 / TOTAL > 60 )); then
   print "   (fast fingerprint matching first, real uploads after). Keep Photos open on AC."
 elif [[ "$MOVEMENT" == "measured" ]] && (( DELTA <= 0 )) && (( OUT_AGE_H >= 1 )); then
   print "🟠 STUCK: $AWAITING awaiting upload, no movement, and the outgoing pipeline"
-  print "   hasn't been touched in ${OUT_AGE_H}h. The scheduler is dormant."
-  print "   Run: $0 --kick   then re-run this doctor in ~15 min."
+  print "   hasn't been touched in ${OUT_AGE_H}h."
+  print "   If uploads were RECENTLY draining: wait up to ~2h first — the engine works in"
+  print "   bursts on a 2h refresh interval, and killing cloudphotod mid-phase resets its"
+  print "   in-memory upload session (a fresh daemon waits out the interval again)."
+  print "   If it was never draining, or 2h+ has passed: $0 --kick, re-run in ~15 min."
 elif [[ "$MOVEMENT" == "measured" ]] && (( DELTA > 0 )); then
   print "🟢 UPLOADING NORMALLY: $AWAITING to go and draining. Keep Photos open on AC power."
 else
