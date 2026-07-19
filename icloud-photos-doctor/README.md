@@ -49,11 +49,14 @@ in the last 24 h/7 d — proves the *download* direction independently), the
 cloud-side asset count vs local, pending reset count and age, outgoing-pipeline
 last-touch, and daemon uptimes.
 
-Nuance: during an active upload phase the engine works in throttled bursts, so a
-single 🟠 STUCK can be a pause between bursts. Treat the first one as
-provisional — `--kick` is harmless and usually restarts the burst; escalate to
-the toggle only if a *second* 15-minute interval after the kick still shows no
-movement.
+Nuance learned the hard way: `--kick` is the right lever for **wedge states**
+(pending resets, attach limbo, a launch-sync that won't run) — but during an
+**active upload phase** the upload session lives in the running `cloudphotod`'s
+memory, and killing it resets that session. A fresh instance may then wait up to
+the engine's `refresh.interval` (2 h) before resuming uploads on its own. So:
+a single 🟠 STUCK mid-upload is usually an inter-burst pause — wait it out
+(give it up to ~2 h) before reaching for `--kick`, and keep `--kick` for the
+wedge verdicts where it demonstrably works.
 
 ## The toggle (when the doctor says WEDGED and `--kick` didn't clear it)
 
