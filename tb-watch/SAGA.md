@@ -1,0 +1,183 @@
+# The Thunderbolt dropout saga
+
+How "one of my drives randomly disconnects sometimes" became a two-incident
+forensic investigation with a named suspect, a co-suspect, and a running
+experiment. Written for future-me; update the [Verdict](#verdict-so-far) as
+evidence lands.
+
+**Window:** 2026-07-17 → ongoing · **Machine:** MacBook Pro M4 Max, macOS 26.5.2 (25F84)
+**Status at last update (2026-07-18):** differential open — flaky Envoy vs. hub
+PCIe switch. Isolation experiment running: EyeOfSauron unplugged at the hub port.
+
+## Cast
+
+| Piece | Detail |
+| --- | --- |
+| Hub | OWC Thunderbolt 5 Hub, FW 62.2 — also powers the laptop (~140 W upstream PD) |
+| "EyeOfSauron" | OWC Envoy Ultra TB5 4 TB, blade reports `OWC Aura Pro IV` FW `ERFM12.0`, SN `121218P2190117`. The chronically-dropping "idle" drive. Prime suspect. |
+| "SecondLifeSSD" | OWC Envoy Ultra TB5 4 TB, **same** FW `ERFM12.0`, SN `121218P219014E`. Hosts the Photos library backing store. Never the one that drops. |
+| "Alexandria" | ThunderBlade X8 32 TB (TB3, FW 68.2): 8 Phison blades FW `ELFM10.0`, SoftRAID mirror (kext 8.6). Hosts Google Drive. |
+| Topology | Everything behind the hub's single upstream cable → one TB bus (Bus 0), one shared tunneled-PCIe domain. Shared fate by construction. |
+| Also in the room | Amphetamine (trigger: AC + home wifi), Ejectify, Backblaze, Spotlight — the last two keep "idle" volumes under constant background I/O. |
+
+## How it started
+
+Chronic annoyance: one Envoy — ironically the one *not* actively used — would
+periodically disconnect. On **2026-07-17 ~12:44** it escalated: all three
+enclosures vanished simultaneously. Hub LED on, drives cool, laptop awake.
+
+Every intuitive theory died on contact with the logs:
+
+- **Not power.** The hub was charging the Mac through the same cable the whole
+  time (battery 56 % → 99 % across the incident). The "laptop wasn't on its
+  charger" observation was true and irrelevant — the hub *is* a charger.
+- **Not sleep.** Awake with display on since 12:06:58; Amphetamine assertions held.
+- **Not the cable/ports.** The killer observation: after the collapse the
+  kernel still held live USB assertions for the hub and both Envoys, and
+  `system_profiler` showed the **Thunderbolt fabric fully trained** (hub
+  80 Gb/s, Envoys 80, ThunderBlade 40) while `diskutil` showed **zero external
+  disks**. Physical link fine, USB fine, power fine — only the tunneled-PCIe
+  layer was dead. Everything that followed built on this.
+
+## Incident #1 — 2026-07-17, the slow spiral
+
+| Time | Event |
+| --- | --- |
+| ~12:09 | Tower plugged in; PD negotiation flaps ~40 s; Mac starts charging via hub |
+| 12:10:05 | Early warning: EyeOfSauron's first mount attempt **fails** (`0x0000004D`), APFS notes "reloading after unclean unmount" (scars from earlier hard drops), two `AppleNVMe Assert failed: (fTerminated == false)` |
+| 12:21–12:29 | Enumeration completes, all volumes mount |
+| 12:34:14 | `IONVMeController::CommandTimeout` on PCI `50:0:0` — mid-**write** |
+| 12:34:18 | The money line (below); only disk13/14 — EyeOfSauron — removed. Everything else keeps working |
+| 12:34–12:40 | Kernel resets/re-probes the hub PCIe bridge 4× (`reset probe child ranges`) |
+| 12:44:10 | Hotplug flap on that subtree (`now present 0` → `present 1`) |
+| 12:44:36 | `apciec[pcic0-bridge]::disableGated` → every device in the domain marked dead in ~1 ms (10 NVMe controllers + XHCI) → `Marking pcic0-bridge as needing hardware reset`. Total loss. |
+
+The money line:
+
+```
+IONVMeController::FatalHandling(): 3rd party NVMe controller. PCI link down. Write.
+MODEL=OWC Aura Pro IV FW=ERFM12.0 CSTS=0xffffffff US[1]=0x0 US[0]=0x23 VID=0xffff DID=0xffff
+```
+
+`CSTS/VID/DID = all-ones` → config-space reads returned nothing: the
+controller — **or the path to it** — fell off the bus. (That parenthetical
+became important on day two.)
+
+**Identification.** PCI topology decode: each Envoy = one Phison
+`0x1987:0x5027` behind an Intel `0x8086:0x5786` (Barlow Ridge) bridge set —
+EyeOfSauron on hub PCIe port `2:0:0`, SecondLifeSSD on `2:2:0`; the
+ThunderBlade = Intel `0x15ef` (Titan Ridge) → 2× ASMedia `0x1b21:0x2806`
+switches → 8× Phison `0x1987:0x5021`, on `2:1:0`. The faulting device was the
+`2:0:0` Envoy, and APFS named it in the same millisecond as the fatal:
+`disk14s1 unmounting volume EyeOfSauron … requested by: kernel_task`.
+Post-remount serial mapping sealed it. Also matched the user-known pattern:
+the historically-dropping drive is the non-Photos one.
+
+**Verdict after #1** (later revised): drive guilty; hub merely the amplifier
+(shared domain = shared blast radius).
+
+## Recovery playbook (validated twice)
+
+1. Unplug the upstream TB cable **at the Mac end**, wait ~10 s, replug — this
+   delivers the hardware reset the kernel flagged; tunnels rebuild, volumes
+   remount. (Power-cycling drives is rarely needed; the fabric never dropped.)
+2. First Aid saying `could not unmount … (-69565)` is **contention, not
+   damage** — fseventsd/Backblaze/Spotlight hold the volume. Fix:
+   `diskutil unmount force diskNsM` → `diskutil verifyVolume diskN` → remount.
+   EyeOfSauron's APFS verified fully clean after #1 despite ≥3 hard removals.
+3. SoftRAID-validate Alexandria; open Photos once to let it self-check.
+
+## Incident #2 — 2026-07-18, the instant kill (plot twist)
+
+Clean reboot at 12:25, 78 quiet minutes, then at **13:44:06.757** a
+Thunderbolt switch notification — and **22 ms later** the kernel probed the
+hub's **top-level** PCIe bridge (`1:0:0`) and found it dead. No
+`CommandTimeout`. No `FatalHandling`. No single-drive prologue. The entire
+domain was marked dead in ~1 ms; volumes force-unmounted within 650 ms
+(EyeOfSauron → Alexandria → SecondLifeSSD — teardown order, not causal
+order). Same end state as #1: fabric trained, USB alive, PCIe gone.
+
+Notes: identical switch notifications fired harmlessly at 13:11, 13:18,
+13:36; `ThunderboltAccessoryUpdaterService` woke 16 min prior
+(likely-coincidental, logged for pattern-watching). `disksleep 0` was already
+set — it did not prevent this (consistent: #2 had no idle-drive prologue).
+
+**Why this changed the verdict:**
+
+- #1 was drive-shaped (10-minute spiral from one device). #2 was hub-shaped
+  (spontaneous bridge death, zero warning).
+- `CSTS=0xffffffff` proves *unreachable*, not *guilty* — a dying hub port
+  produces the same all-ones reads as a dying drive.
+- Both days orbit hub PCIe port `2:0:0` — EyeOfSauron's slot. If the **port**
+  is the flaky element, whatever drive sits there inherits the blame… which
+  would also explain the original irony (the *idle* drive kept dropping).
+
+**Hub promoted to co-suspect.**
+
+## The two models
+
+- **A — drive-centric:** EyeOfSauron's blade hangs (idle transitions and/or
+  under write); #1 was a polite hang, #2 a hang that instantly wedged the
+  hub's switch. Supported by #1's isolated phase and the 12:10 mount failure.
+- **B — hub-centric:** the hub's PCIe switch is flaky; its `2:0:0` port
+  degrading intermittently *manufactured* the drive's bad reputation, and #2
+  was the switch dying outright. One explanation covers both days.
+
+## The discriminator (running now)
+
+Unplug EyeOfSauron **at the hub end** — its cable is captive only at the
+drive end, and it's bus-powered, so pulling the hub-side connector is full
+electrical absence with zero unracking. Then:
+
+| Condition | Outcome | Verdict |
+| --- | --- | --- |
+| Unplugged | Collapse happens anyway | **Hub guilty** — failed with the suspect absent |
+| Unplugged | Days of silence | **Drive guilty** by elimination (base rate was 2 collapses in 2 days + chronic history) |
+| Reintroduced on the **other** Envoy port | Trouble resumes | Drive sealed as culprit, port exonerated |
+| Reintroduced, quiet on new port, acts up only on `2:0:0` | | Hub port guilty |
+
+**Unmounting is not a substitute**: an unmounted drive stays powered,
+enumerated, and idling on the shared fabric — historically this drive's most
+dangerous regime — and a controller hang still triggers the same kernel
+recovery with the same blast radius. Electrical absence or nothing.
+
+## Mitigations & changes made
+
+- `sudo pmset -a disksleep 0` (was 10). The pmset warning about disk sleep vs
+  system sleep is ancient advisory boilerplate; setting verified applied.
+- **tb-watch** LaunchAgent + `tb-forensics.sh` (this folder): captures the
+  *mode* of the next failure (the experiment's actual data), survives
+  reboots, hard-capped ~50 MB. The unified log store only retains a few days
+  on this machine's chatty workload — the recorder is retention insurance.
+- SoftRAID ≥ 8.6.1 (8.3/8.5 changelogs added disconnect resilience; SoftRAID
+  does not *cause* these — reproducible per OWC with unformatted disks).
+- macOS 26.5.2 is current; the 26.3 external-storage regression was fixed in
+  26.4 — not a factor here.
+
+## Ammunition for the OWC ticket
+
+- Both signatures verbatim: the #1 `FatalHandling … PCI link down …
+  CSTS=0xffffffff` line, and #2's spontaneous `1:0:0` bridge death with
+  `disableGated` + `needing hardware reset`, 22 ms after a switch notify.
+- Serials/firmware: EyeOfSauron `121218P2190117`, SecondLifeSSD
+  `121218P219014E`, both blades `ERFM12.0` (identical — so unit- or
+  port-specific, not firmware-version); hub FW `62.2` (ask if newer exists);
+  ThunderBlade blades `ELFM10.0`.
+- No public Envoy Ultra firmware updater exists (OWC Drive Guide only does
+  formatting) — a fix ships via support or RMA.
+- OWC's own KB acknowledges chain-wide simultaneous ejects as a known
+  Thunderbolt-wide issue; the Envoy manual documents bus-power limits on some
+  M4 Macs (two bus-powered Envoys share this hub's budget).
+
+## Verdict so far
+
+- [x] Ruled out: power loss, sleep/wake, cable seating, physical link, SoftRAID, filesystem damage, Amphetamine gaps
+- [x] #1 trigger: EyeOfSauron unreachable mid-write → failed kernel recovery collapsed the domain
+- [x] #2: spontaneous hub top-bridge death, no drive prologue → hub co-suspect
+- [x] Both Envoys on identical firmware → unit- or port-specific
+- [ ] Drive vs hub vs hub-port: isolation run in progress (EyeOfSauron unplugged at hub, 2026-07-18)
+- [ ] Reintroduction on the other Envoy port
+- [ ] OWC ticket filed / firmware answers received
+
+**When it happens again:** `./tb-forensics.sh 3h` and/or read
+`~/Library/Logs/tb-watch.log`. Recovery: see the playbook above.

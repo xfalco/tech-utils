@@ -3,7 +3,9 @@
 Always-on incident recorder and post-incident forensics for Thunderbolt/NVMe
 storage drops on macOS. Built (Jul 2026) while chasing repeated whole-domain
 PCIe collapses on an OWC Thunderbolt 5 Hub feeding two Envoy Ultras and a
-ThunderBlade X8.
+ThunderBlade X8. The full investigation — both captured incidents, the PCI
+topology decode, and the drive-vs-hub differential — is written up in
+[SAGA.md](SAGA.md).
 
 ## Pieces
 

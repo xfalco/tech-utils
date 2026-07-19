@@ -7,6 +7,26 @@ Debugging and recovery utilities, collected as they get built.
 | [tb-watch](tb-watch/) | Always-on Thunderbolt/NVMe incident recorder (LaunchAgent) + one-shot post-incident forensics for external-storage drops on macOS |
 | [icloud-photos-doctor](icloud-photos-doctor/) | Ground-truth iCloud Photos sync diagnosis: stuck-upload detection with rate/ETA, wedged-engine (pending resets) detection, and the escalation ladder from daemon kick to the iCloud re-baseline toggle |
 
+## [tb-watch](tb-watch/)
+
+Always-on incident recorder and post-incident forensics for Thunderbolt/NVMe
+storage drops, born from a July 2026 investigation of whole-tower dropouts on
+an OWC TB5 hub feeding two Envoy Ultras and a ThunderBlade X8:
+
+- **LaunchAgent recorder** — streams curated kernel events (NVMe fatals,
+  PCIe tunnel teardowns, volume unmounts, Thunderbolt switch events) to a
+  hard-capped ~50 MB log that survives reboots, so the *mode* of a failure is
+  never lost to log-store retention.
+- **`tb-forensics.sh [window]`** — one-shot incident report from the unified
+  log store: fatals, teardown markers, volume-unmount order, hotplug
+  interrupts, current TB tree, sleep/wake history.
+
+The [saga writeup](tb-watch/SAGA.md) reconstructs both captured incidents —
+from "drives randomly disconnect" to a named suspect drive, a co-suspect hub,
+and the isolation experiment that discriminates them; the
+[folder README](tb-watch/README.md) covers install/uninstall and how to read
+an incident.
+
 ## [icloud-photos-doctor](icloud-photos-doctor/)
 
 Ground-truth diagnosis for iCloud Photos sync, for the days when the Photos UI
