@@ -11,6 +11,10 @@ resets sat `pending` in the engine's `resetevents.plist`, blocking all uploads
 while `syncstatus.plist` reported everything unblocked. Nothing in the UI showed
 it; 30 GB of new imports simply never left the Mac. Daemon restarts cleared one
 reset; a reboot cleared none; only the iCloud Photos off/on re-baseline fixed it.
+The full debugging narrative, killed theories, and CPL architecture notes live in
+**[SAGA.md](SAGA.md)** — the reference for the next wedge. The 30 GB that exposed
+it came from [shared-album-rescue](https://github.com/xfalco/shared-album-rescue),
+whose `sync-status` command shares this tool's DNA.
 
 ## Usage
 
