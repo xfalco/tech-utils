@@ -6,8 +6,10 @@ experiment. Written for future-me; update the [Verdict](#verdict-so-far) as
 evidence lands.
 
 **Window:** 2026-07-17 → ongoing · **Machine:** MacBook Pro M4 Max, macOS 26.5.2 (25F84)
-**Status at last update (2026-07-18):** differential open — flaky Envoy vs. hub
-PCIe switch. Isolation experiment running: EyeOfSauron unplugged at the hub port.
+**Status at last update (2026-07-20):** three incidents on file — instant-kill
+signature ×2, drive-fatal spiral ×1 — leaning hub. EyeOfSauron physically
+removed 2026-07-20 23:17, so the isolation run is finally clean: **any further
+collapse convicts the hub.**
 
 ## Cast
 
@@ -114,6 +116,37 @@ set — it did not prevent this (consistent: #2 had no idle-drive prologue).
 
 **Hub promoted to co-suspect.**
 
+## Incident #3 — 2026-07-20, boot-time repeat (instant kill ×2)
+
+A restart with everything still attached. Clean shutdown (all three volumes
+unmounted politely at 22:53:23), clean boot at 22:53:40, login at ~23:03 —
+SoftRAID loads, runs its SMART pass (**"No disks failed the SMART test"**),
+volumes mount. Twelve seconds later:
+
+| Time | Event |
+| --- | --- |
+| 23:03:21.8 → 27.280 | Three TB switch notifications (`event_code = 38`) over ~6 s |
+| 23:03:27.302 | **22 ms** after the last notify: `apciec disableGated` → hub top bridge `1:0:0` **dead** → volumes killed by `kernel_task` within 6 s → `needing hardware reset` |
+| 23:03:27 | SoftRAID: all 8 blades "removed or stopped responding while the volume was mounted and in use", volume error `E00002E4` |
+| ~23:17 | Replug **without** EyeOfSauron (physically removed) — clean re-enumeration, tower back at full speed |
+
+Takeaways:
+
+- Identical fingerprint to #2 — notify → 22 ms → bridge death, zero NVMe
+  precursor — now seen twice, under opposite conditions (78 quiet minutes
+  into an afternoon vs. 12 s into the post-login mount rush). Score:
+  instant-kill ×2, drive-fatal spiral ×1.
+- The drives passed SMART **three seconds before** the domain died — healthy
+  by their own account. "Failing disk" in the classic sense is dead as a
+  theory (SMART can't see controller-firmware hangs, but it rules out the
+  ordinary kind).
+- EyeOfSauron was attached but produced no device-level event; nothing ties
+  it to this one. Formally non-discriminating, evidentially hub-leaning.
+- tb-watch survived the reboot and pinned the moment. Known limitation
+  observed: `log stream` drops messages during event storms, so
+  `tb-forensics.sh` / `log show` (the unified store) remain the full record —
+  the recorder's job is the timestamp and the guarantee, not the whole story.
+
 ## The two models
 
 - **A — drive-centric:** EyeOfSauron's blade hangs (idle transitions and/or
@@ -125,9 +158,11 @@ set — it did not prevent this (consistent: #2 had no idle-drive prologue).
 
 ## The discriminator (running now)
 
-Unplug EyeOfSauron **at the hub end** — its cable is captive only at the
-drive end, and it's bus-powered, so pulling the hub-side connector is full
-electrical absence with zero unracking. Then:
+**Live since 2026-07-20 23:17** — EyeOfSauron physically removed after
+incident #3; from here, **any collapse convicts the hub**. The setup: unplug
+EyeOfSauron **at the hub end** — its cable is captive only at the drive end,
+and it's bus-powered, so pulling the hub-side connector is full electrical
+absence with zero unracking. Then:
 
 | Condition | Outcome | Verdict |
 | --- | --- | --- |
@@ -171,12 +206,13 @@ recovery with the same blast radius. Electrical absence or nothing.
 
 ## Verdict so far
 
-- [x] Ruled out: power loss, sleep/wake, cable seating, physical link, SoftRAID, filesystem damage, Amphetamine gaps
+- [x] Ruled out: power loss, sleep/wake, cable seating, physical link, SoftRAID, filesystem damage, Amphetamine gaps, classic disk failure (SMART all-pass 3 s before incident #3)
 - [x] #1 trigger: EyeOfSauron unreachable mid-write → failed kernel recovery collapsed the domain
 - [x] #2: spontaneous hub top-bridge death, no drive prologue → hub co-suspect
+- [x] #3: same instant-kill fingerprint as #2 (notify → 22 ms → bridge death), EyeOfSauron attached but uninvolved → instant-kill ×2, leaning hub
 - [x] Both Envoys on identical firmware → unit- or port-specific
-- [ ] Drive vs hub vs hub-port: isolation run in progress (EyeOfSauron unplugged at hub, 2026-07-18)
-- [ ] Reintroduction on the other Envoy port
+- [x] Isolation run armed for real: EyeOfSauron physically removed 2026-07-20 23:17
+- [ ] Isolation outcome: any collapse → hub RMA; extended silence → reintroduce EyeOfSauron on the other Envoy port
 - [ ] OWC ticket filed / firmware answers received
 
 **When it happens again:** `./tb-forensics.sh 3h` and/or read
