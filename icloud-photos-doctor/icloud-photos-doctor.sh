@@ -183,6 +183,9 @@ elif (( TOTAL > 0 && AWAITING * 100 / TOTAL > 60 )); then
   print "🔵 RE-BASELINE IN PROGRESS: most of the library is marked un-synced, which is"
   print "   normal right after toggling iCloud Photos — the count climbs, then drains"
   print "   (fast fingerprint matching first, real uploads after). Keep Photos open on AC."
+elif (( AWAITING < 25 )); then
+  print "🟢 NEARLY DONE: $AWAITING awaiting — a tiny tail the engine clears on its own"
+  print "   cadence. Not worth any intervention; re-check in a few hours if curious."
 elif [[ "$MOVEMENT" == "measured" ]] && (( DELTA <= 0 )) && (( OUT_AGE_H >= 1 )); then
   print "🟠 STUCK: $AWAITING awaiting upload, no movement, and the outgoing pipeline"
   print "   hasn't been touched in ${OUT_AGE_H}h."
