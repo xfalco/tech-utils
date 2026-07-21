@@ -164,20 +164,29 @@ that routine *errors* — not "insufficient space," but the routine itself faili
 system-level space-management bug in Photos on this configuration, not anything
 fixable from userspace.
 
-### The 22 that couldn't sync — a bug in our own tool
+### The items that couldn't sync — unreliable down to the count
 
-A restart cleared the stuck banner but left "Couldn't Sync 22 Items to iCloud,"
-and clicking **View** crashed Photos outright (`EXC_BREAKPOINT` in
+A restart cleared the stuck banner but left "Couldn't Sync **22** Items to
+iCloud," and clicking **View** crashed Photos outright (`EXC_BREAKPOINT` in
 `-[NSApplication reportException:]` off an `NSTextView` mouseDown — an AppKit UI
-bug reacting to the failed set, *not* data corruption). The 22 (`ZCLOUDLOCALSTATE
-= 4`) were all shared-album-rescue imports, and were exactly **11 photos imported
-twice**. Root cause: a photo living in two shared albums has two distinct cloud
-GUIDs but one original; the importer deduped by GUID (ledger) and by
-filename+time against the *existing* library, so two copies both new-to-library
-in one batch slipped through. Fix recorded in shared-album-rescue: dedup
-within-batch by original filename + capture time, not GUID alone. Cleanup: the
-`group-unsyncable` command gathers state-4 assets into an album for deletion,
-sidestepping the crashing View button.
+bug reacting to the set, *not* data corruption). On a later View the same alert
+listed only **10**. The count itself is unreliable — one more UI-vs-reality gap.
+
+Per the database (ground truth), 22 assets sit at `ZCLOUDLOCALSTATE = 4`, all
+shared-album-rescue imports: ~2048px **Live Photos** (still + motion component),
+appearing as 11 filename pairs. These are **not** low-value — they are exactly
+the rescued family moments the project exists to save. (An earlier draft of this
+saga wrongly called them deletable duplicates; correcting that here — the
+mischaracterization came from reading DB dimensions and duplicate filenames
+without weighing that they're irreplaceable Live Photos.) The pairing is a real
+dedup gap in the importer: a photo in two shared albums has two cloud GUIDs but
+one original, and the importer deduped by GUID + filename/time against the
+*existing* library, so two copies both new-to-library in one batch slipped
+through. Fix recorded in shared-album-rescue: dedup within-batch by original
+filename + capture time. Cleanup is a careful **review**, not a blind delete: the
+`group-unsyncable` command gathers the state-4 assets into an album so the owner
+can keep the keepers and prune only true duplicates, avoiding the crashing View
+button.
 
 ### The Thunderbolt angle (the co-plot, revisited)
 
@@ -200,6 +209,17 @@ photos from an **iPhone/iPad on the same iCloud account** (which also supports
 contributing to shared albums, unlike the Mac's PhotoKit), and let them sync
 down. When a large external-SSD iCloud library on this macOS build starts
 misbehaving, the honest first move is to stop fighting the Mac.
+
+**The strongest single pattern, decisive on its own: the Photos UI was wrong at
+nearly every turn.** "Last Synced Jan 13" (months stale), "Syncing 79,465" then
+"21,882" frozen over an idle, already-synced engine, "Downloading 164" stuck
+while the engine's download counter read 0, "Couldn't Sync 22" that becomes 10
+on click, and a View button that crashes. The simplest hypothesis that fits all
+of it is that **this is a buggy Photos release** (macOS 26.5.2, a relatively new
+OS) — a systemic UI-vs-engine unreliability that *compounds* the external-SSD /
+large-library fragility rather than being separate from it. Practical takeaway
+for anyone debugging this: **trust the database and the engine state files, never
+the Photos UI.** That single rule is what `icloud-photos-doctor` automates.
 
 ## Related
 
