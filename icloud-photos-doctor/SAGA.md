@@ -127,6 +127,80 @@ distinguishes "all done" from "upload queue frozen for a week."
 6. Have a verified backup before the toggle. (It's metadata-only and safe — but
    the backup is what makes that sentence relaxing.)
 
+## Act two: the import that would not import (Jul 20–21)
+
+After the upload wedge was beaten, a follow-on task — import 7 photos into the
+library — surfaced a *second*, deeper class of failure and turned into an
+exhaustive multi-day investigation. Documented here because the conclusion is
+the important part: **this specific setup — an ~80k-item, 2.3 TB Photos library
+on an external TB5 SSD, synced to iCloud, on macOS 26.5.2 — is genuinely fragile,
+and no amount of coaxing made Photos' import reliable.**
+
+### What was tried, and ruled out
+
+Every import (GUI, AppleScript, and a synthetic throwaway image) failed. The
+failure was never the files — verified valid JPEGs, 6000×4000, decoding cleanly.
+Ruled out, each on evidence:
+
+| Suspected cause | How it died |
+| --- | --- |
+| The specific files / format / quarantine | A brand-new synthetic image failed identically; quarantine-stripped local copies failed too |
+| Google-Drive source location | Failed the same from a local copy and from the library's own volume |
+| Silent no-op (nothing happening) | Each attempt threw a modal "Cannot Import Item" dialog — a retry loop piled up ~dozens overnight (a real self-inflicted mistake; retry loops that trigger modals are harmful) |
+| Photos mid-sync gating imports | Persisted long after `sync-status` showed the library fully synced |
+| Disk space (the literal error) | Library volume 2.5 TB free, boot volume 595 GB, **no** local snapshots holding purgeable space, volume writable |
+| Confused internal library state | A full **Repair Library** (⌥⌘ on launch, ~hours) did **not** fix it |
+
+### The real error, and the wall
+
+Widening the dialog's Reason column (after the accessibility route needed an app
+restart to take effect) revealed the full text, previously truncated:
+
+> **There was an error attempting to free up disk space for import.**
+
+Photos runs a "free up disk space" routine before every import. On this library
+that routine *errors* — not "insufficient space," but the routine itself failing
+— even with terabytes free. It survived a Repair Library. That is the wall: a
+system-level space-management bug in Photos on this configuration, not anything
+fixable from userspace.
+
+### The 22 that couldn't sync — a bug in our own tool
+
+A restart cleared the stuck banner but left "Couldn't Sync 22 Items to iCloud,"
+and clicking **View** crashed Photos outright (`EXC_BREAKPOINT` in
+`-[NSApplication reportException:]` off an `NSTextView` mouseDown — an AppKit UI
+bug reacting to the failed set, *not* data corruption). The 22 (`ZCLOUDLOCALSTATE
+= 4`) were all shared-album-rescue imports, and were exactly **11 photos imported
+twice**. Root cause: a photo living in two shared albums has two distinct cloud
+GUIDs but one original; the importer deduped by GUID (ledger) and by
+filename+time against the *existing* library, so two copies both new-to-library
+in one batch slipped through. Fix recorded in shared-album-rescue: dedup
+within-batch by original filename + capture time, not GUID alone. Cleanup: the
+`group-unsyncable` command gathers state-4 assets into an album for deletion,
+sidestepping the crashing View button.
+
+### The Thunderbolt angle (the co-plot, revisited)
+
+The owner's hypothesis — charging the MacBook at up to 240 W *and* running
+high-bandwidth library sync down a single OWC TB5 cable through the hub — is
+sound for the *drive-disconnect* incidents ([tb-watch](../tb-watch/) logged bus
+events during this window) and worth fixing for stability (give the SSD its own
+port; charge the Mac separately). But it is **not** the import failure's cause:
+the SSD read perfectly throughout, and the import error is Photos software, not
+drive I/O.
+
+### Verdict
+
+Exhaustively investigated across ~3 days: database forensics, engine state
+files, unified logs, crash traces, volume/snapshot/purgeable-space accounting,
+daemon CPU/network sampling, a full library repair, and PhotoKit capability
+probes. The upload wedge was real and fixable (see act one). The import failure
+was **not** fixable from userspace on this setup and is best routed around: add
+photos from an **iPhone/iPad on the same iCloud account** (which also supports
+contributing to shared albums, unlike the Mac's PhotoKit), and let them sync
+down. When a large external-SSD iCloud library on this macOS build starts
+misbehaving, the honest first move is to stop fighting the Mac.
+
 ## Related
 
 - [icloud-photos-doctor.sh](icloud-photos-doctor.sh) — all of the above as a
