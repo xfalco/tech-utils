@@ -65,7 +65,19 @@ done
 DB="$SCRATCH/Photos.sqlite"
 
 # ---------- library integrity (matters after drive drops) ----------
+# A plain file copy of the sqlite trio can tear under heavy write load (e.g. a
+# re-baseline rewriting every row) and fail quick_check even though the live
+# database is fine. Before declaring damage, retake the snapshot with SQLite's
+# online backup API, which is consistent by construction.
 CHECK=$(sqlite3 "$DB" 'PRAGMA quick_check(3);' 2>&1 | head -1)
+if [[ "$CHECK" != "ok" ]]; then
+  print "…file-copy snapshot failed quick_check; retrying with sqlite online backup…"
+  rm -f "$SCRATCH"/*
+  sqlite3 -cmd ".timeout 60000" "file:$LIBRARY/database/Photos.sqlite?mode=ro" \
+    ".backup '$SCRATCH/Photos.sqlite'" 2>/dev/null || true
+  CHECK=$(sqlite3 "$SCRATCH/Photos.sqlite" 'PRAGMA quick_check(3);' 2>&1 | head -1)
+  DB="$SCRATCH/Photos.sqlite"
+fi
 if [[ "$CHECK" != "ok" ]]; then
   print "🔴 Database integrity: $CHECK"
   print "   → The library database is damaged. Quit Photos, relaunch holding Option+Command,"
@@ -171,6 +183,9 @@ elif (( TOTAL > 0 && AWAITING * 100 / TOTAL > 60 )); then
   print "🔵 RE-BASELINE IN PROGRESS: most of the library is marked un-synced, which is"
   print "   normal right after toggling iCloud Photos — the count climbs, then drains"
   print "   (fast fingerprint matching first, real uploads after). Keep Photos open on AC."
+elif (( AWAITING < 25 )); then
+  print "🟢 NEARLY DONE: $AWAITING awaiting — a tiny tail the engine clears on its own"
+  print "   cadence. Not worth any intervention; re-check in a few hours if curious."
 elif [[ "$MOVEMENT" == "measured" ]] && (( DELTA <= 0 )) && (( OUT_AGE_H >= 1 )); then
   print "🟠 STUCK: $AWAITING awaiting upload, no movement, and the outgoing pipeline"
   print "   hasn't been touched in ${OUT_AGE_H}h."
