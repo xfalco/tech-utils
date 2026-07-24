@@ -1,15 +1,14 @@
 # The Thunderbolt dropout saga
 
-How "one of my drives randomly disconnects sometimes" became a two-incident
-forensic investigation with a named suspect, a co-suspect, and a running
-experiment. Written for future-me; update the [Verdict](#verdict-so-far) as
-evidence lands.
+How "one of my drives randomly disconnects sometimes" became a four-incident
+forensic investigation with a named suspect, a co-suspect, a running
+experiment — and, finally, a conviction. Written for future-me.
 
-**Window:** 2026-07-17 → ongoing · **Machine:** MacBook Pro M4 Max, macOS 26.5.2 (25F84)
-**Status at last update (2026-07-20):** three incidents on file — instant-kill
-signature ×2, drive-fatal spiral ×1 — leaning hub. EyeOfSauron physically
-removed 2026-07-20 23:17, so the isolation run is finally clean: **any further
-collapse convicts the hub.**
+**Window:** 2026-07-17 → 2026-07-24 · **Machine:** MacBook Pro M4 Max, macOS 26.5.2 (25F84)
+**Status: CLOSED — EyeOfSauron convicted (incident #4).** On a direct,
+hub-free connection it reproduced the instant-kill signature solo, while the
+tower ran clean without it. Hub exonerated (every additional quiet tower-day
+is confirmation). Remaining: RMA the drive, file the OWC ticket.
 
 ## Cast
 
@@ -147,6 +146,50 @@ Takeaways:
   `tb-forensics.sh` / `log show` (the unified store) remain the full record —
   the recorder's job is the timestamp and the guarantee, not the whole story.
 
+## Incident #4 — 2026-07-23, the conviction (solo repro on a direct port)
+
+The reintroduction arm, run in its strongest form: EyeOfSauron moved out of
+the tower entirely and plugged **directly into a Mac port** — its own
+Thunderbolt bus, its own PCIe domain (`pcic2`; the hub only ever lived on
+`pcic0`), no hub silicon in the path. Within about a day, with the Mac fully
+awake on AC and no sleep transition anywhere near:
+
+    23:12:09.836  apciec[pcic2-bridge]::disableGated disabling
+    23:12:09.837  dead child at [i4]1:0:0(0x8086:0x5786)
+    23:12:09.844  disk18s1 unmounting volume EyeOfSauron, requested by: kernel_task
+    23:12:09.869  Marking pcic2-bridge as needing hardware reset
+
+Only its private domain died. SecondLifeSSD and Alexandria on the hub never
+blinked — the macOS notification named EyeOfSauron and *only* EyeOfSauron.
+
+Why this closes the case:
+
+- **The signature transferred to the drive.** The instant-kill pattern —
+  first-hop Intel `0x8086:0x5786` bridge dead → `disableGated` → `needing
+  hardware reset` — was the strongest hub evidence, because in the tower that
+  first hop was the hub's chip. But the Envoy Ultra carries its **own**
+  Barlow Ridge controller, and on a direct connection *that* is the first
+  hop — and it died identically, solo. The drive doesn't just hang its NVMe
+  blade (incident #1); it kills its own Thunderbolt controller (the
+  #2/#3 shape). It was attached for every tower event, and it produces both
+  signatures alone.
+- **The ledger.** Tower with EyeOfSauron: 3 collapses in 4 days. Tower
+  without it: zero events since 2026-07-20 23:17. EyeOfSauron alone on a
+  pristine port: dead within ~a day. Every configuration containing the
+  drive fails; every configuration without it doesn't.
+- **No confounders.** Different port, different domain, no hub, machine
+  awake, SMART historically clean.
+
+**Verdict: EyeOfSauron guilty on all four incidents; hub exonerated.** The
+RMA unit is conveniently indivisible — blade, controller, and captive cable
+travel together, so whichever of the three is at fault, all of it goes back.
+
+Epilogue, and the reason this folder exists: when cross-checking this event
+the next morning, the unified log store had **already rolled past it** — even
+14-day queries returned nothing on this log-heavy machine. The sole surviving
+record of the decisive event of the investigation is
+`~/Library/Logs/tb-watch.log`. Retention insurance, cashed in.
+
 ## The two models
 
 - **A — drive-centric:** EyeOfSauron's blade hangs (idle transitions and/or
@@ -156,10 +199,16 @@ Takeaways:
   degrading intermittently *manufactured* the drive's bad reputation, and #2
   was the switch dying outright. One explanation covers both days.
 
-## The discriminator (running now)
+**Resolution (2026-07-24): Model A wins.** Incident #4 showed the drive
+reproducing the "hub-shaped" signature with no hub present, and the tower ran
+clean once the drive left.
 
-**Live since 2026-07-20 23:17** — EyeOfSauron physically removed after
-incident #3; from here, **any collapse convicts the hub**. The setup: unplug
+## The discriminator (concluded)
+
+**Concluded 2026-07-23** — the reintroduction arm fired first: connected
+directly to a Mac port, EyeOfSauron killed its own private domain (incident
+#4) while the tower stayed clean without it. Drive convicted, hub cleared.
+The original setup for reference: unplug
 EyeOfSauron **at the hub end** — its cable is captive only at the drive end,
 and it's bus-powered, so pulling the hub-side connector is full electrical
 absence with zero unracking. Then:
@@ -212,7 +261,8 @@ recovery with the same blast radius. Electrical absence or nothing.
 - [x] #3: same instant-kill fingerprint as #2 (notify → 22 ms → bridge death), EyeOfSauron attached but uninvolved → instant-kill ×2, leaning hub
 - [x] Both Envoys on identical firmware → unit- or port-specific
 - [x] Isolation run armed for real: EyeOfSauron physically removed 2026-07-20 23:17
-- [ ] Isolation outcome: any collapse → hub RMA; extended silence → reintroduce EyeOfSauron on the other Envoy port
+- [x] Isolation outcome (2026-07-24): tower clean for 3.5 days without the drive AND the drive reproduced the instant-kill signature solo on a direct port → **EyeOfSauron convicted, hub exonerated**
+- [ ] RMA EyeOfSauron (SN `121218P2190117`, FW `ERFM12.0`) — lead with the solo direct-port repro; attach both signatures and the SMART-clean note
 - [ ] OWC ticket filed / firmware answers received
 
 **When it happens again:** `./tb-forensics.sh 3h` and/or read
